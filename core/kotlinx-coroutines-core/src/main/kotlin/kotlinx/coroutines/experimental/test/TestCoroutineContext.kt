@@ -16,7 +16,6 @@
 
 package kotlinx.coroutines.experimental.test
 
-import kotlinx.atomicfu.*
 import kotlinx.coroutines.experimental.*
 import kotlinx.coroutines.experimental.internal.*
 import java.util.concurrent.TimeUnit
@@ -42,7 +41,7 @@ class TestCoroutineContext(private val name: String? = null) : CoroutineContext 
     private val uncaughtExceptions = mutableListOf<Throwable>()
 
     private val ctxDispatcher = Dispatcher()
-    
+
     private val ctxHandler = CoroutineExceptionHandler { _, exception ->
         uncaughtExceptions += exception
     }
@@ -51,10 +50,10 @@ class TestCoroutineContext(private val name: String? = null) : CoroutineContext 
     private val queue = ThreadSafeHeap<TimedRunnable>()
 
     // The per-scheduler global order counter.
-    private val counter = atomic(0L)
+    private var counter = 0L
 
     // Storing time in nanoseconds internally.
-    private val time = atomic(0L)
+    private var time = 0L
 
     /**
      * Exceptions that were caught during a [launch] or a [async] + [Deferred.await].
@@ -78,7 +77,7 @@ class TestCoroutineContext(private val name: String? = null) : CoroutineContext 
         key === CoroutineExceptionHandler -> ctxDispatcher
         else -> this
     }
-    
+
     /**
      * Returns the current virtual clock-time as it is known to this CoroutineContext.
      *
@@ -86,7 +85,7 @@ class TestCoroutineContext(private val name: String? = null) : CoroutineContext 
      * @return The virtual clock-time
      */
     public fun now(unit: TimeUnit = TimeUnit.MILLISECONDS)=
-        unit.convert(time.value, TimeUnit.NANOSECONDS)
+        unit.convert(time, TimeUnit.NANOSECONDS)
 
     /**
      * Moves the CoroutineContext's virtual clock forward by a specified amount of time.
@@ -99,9 +98,9 @@ class TestCoroutineContext(private val name: String? = null) : CoroutineContext 
      * @return The amount of delay-time that this CoroutinesContext's clock has been forwarded.
      */
     public fun advanceTimeBy(delayTime: Long, unit: TimeUnit = TimeUnit.MILLISECONDS): Long {
-        val oldTime = time.value
+        val oldTime = time
         advanceTimeTo(oldTime + unit.toNanos(delayTime), TimeUnit.NANOSECONDS)
-        return unit.convert(time.value - oldTime, TimeUnit.NANOSECONDS)
+        return unit.convert(time - oldTime, TimeUnit.NANOSECONDS)
     }
 
     /**
@@ -113,27 +112,86 @@ class TestCoroutineContext(private val name: String? = null) : CoroutineContext 
     fun advanceTimeTo(targetTime: Long, unit: TimeUnit = TimeUnit.MILLISECONDS) {
         val nanoTime = unit.toNanos(targetTime)
         triggerActions(nanoTime)
-        if (nanoTime > time.value) time.value = nanoTime
+        if (nanoTime > time) time = nanoTime
     }
 
     /**
      * Triggers any actions that have not yet been triggered and that are scheduled to be triggered at or
      * before this CoroutineContext's present virtual clock-time.
      */
-    public fun triggerActions() = triggerActions(time.value)
+    public fun triggerActions() = triggerActions(time)
 
     /**
      * Cancels all not yet triggered actions. Be careful calling this, since it can seriously
      * mess with your coroutines work. This method should usually be called on tear-down of a
      * unit test.
      */
-    public fun cancelAllActions() = queue.clear()
+    public fun cancelAllActions() {
+        // An 'is-empty' test is required to avoid a NullPointerException in the 'clear()' method
+        if (!queue.isEmpty) queue.clear()
+    }
+
+    /**
+     * This method does nothing if there is one unhandled exception that satisfies the given predicate.
+     * Otherwise it throws an [AssertionError] with the given message.
+     *
+     * (this method will clear the list of unhandled exceptions)
+     *
+     * @param message Message of the [AssertionError]. Defaults to an empty String.
+     * @param predicate The predicate that must be satisfied.
+     */
+    public fun assertUnhandledException(message: String = "", predicate: (Throwable) -> Boolean) {
+        if (uncaughtExceptions.size != 1 || !predicate(uncaughtExceptions[0])) throw AssertionError(message)
+        uncaughtExceptions.clear()
+    }
+
+    /**
+     * This method does nothing if there are no unhandled exceptions or all of them satisfy the given predicate.
+     * Otherwise it throws an [AssertionError] with the given message.
+     *
+     * (this method will clear the list of unhandled exceptions)
+     *
+     * @param message Message of the [AssertionError]. Defaults to an empty String.
+     * @param predicate The predicate that must be satisfied.
+     */
+    public fun assertAllUnhandledExceptions(message: String = "", predicate: (Throwable) -> Boolean) {
+        if (!uncaughtExceptions.all(predicate)) throw AssertionError(message)
+        uncaughtExceptions.clear()
+    }
+
+    /**
+     * This method does nothing if one or more unhandled exceptions satisfy the given predicate.
+     * Otherwise it throws an [AssertionError] with the given message.
+     *
+     * (this method will clear the list of unhandled exceptions)
+     *
+     * @param message Message of the [AssertionError]. Defaults to an empty String.
+     * @param predicate The predicate that must be satisfied.
+     */
+    public fun assertAnyUnhandledException(message: String = "", predicate: (Throwable) -> Boolean) {
+        if (!uncaughtExceptions.any(predicate)) throw AssertionError(message)
+        uncaughtExceptions.clear()
+    }
+
+    /**
+     * This method does nothing if the list of unhandled exceptions satisfy the given predicate.
+     * Otherwise it throws an [AssertionError] with the given message.
+     *
+     * (this method will clear the list of unhandled exceptions)
+     *
+     * @param message Message of the [AssertionError]. Defaults to an empty String.
+     * @param predicate The predicate that must be satisfied.
+     */
+    public fun assertExceptions(message: String = "", predicate: (List<Throwable>) -> Boolean) {
+        if (!predicate(uncaughtExceptions)) throw AssertionError(message)
+        uncaughtExceptions.clear()
+    }
 
     private fun post(block: Runnable) =
-        queue.addLast(TimedRunnable(block, counter.getAndIncrement()))
+        queue.addLast(TimedRunnable(block, counter++))
 
     private fun postDelayed(block: Runnable, delayTime: Long) =
-        TimedRunnable(block, counter.getAndIncrement(), time.value + TimeUnit.MILLISECONDS.toNanos(delayTime))
+        TimedRunnable(block, counter++, time + TimeUnit.MILLISECONDS.toNanos(delayTime))
             .also {
                 queue.addLast(it)
             }
@@ -151,7 +209,7 @@ class TestCoroutineContext(private val name: String? = null) : CoroutineContext 
         while (true) {
             val current = queue.removeFirstIf { it.time <= targetTime } ?: break
             // If the scheduled time is 0 (immediate) use current virtual time
-            if (current.time != 0L) time.value = current.time
+            if (current.time != 0L) time = current.time
             current.run()
         }
     }
@@ -199,3 +257,49 @@ private class TimedRunnable(
 
     override fun toString() = "TimedRunnable(time=$time, run=$run)"
 }
+
+/**
+ * Executes a block of code in which a unit-test can be written using the provided [TestCoroutineContext]. The provided
+ * [TestCoroutineContext] is available in the [testBody] as the `this` receiver.
+ *
+ * The [testBody] is executed and an [AssertionError] is thrown if the list of unhandled exceptions is not empty and
+ * contains any exception that is not a [CancellationException].
+ *
+ * If the [testBody] successfully executes one of the [TestCoroutineContext.assertAllUnhandledExceptions],
+ * [TestCoroutineContext.assertAnyUnhandledException], [TestCoroutineContext.assertUnhandledException] or
+ * [TestCoroutineContext.assertExceptions], the list of unhandled exceptions will have been cleared and this method will
+ * not throw an [AssertionError].
+ *
+ * @param testContext The provided [TestCoroutineContext]. If not specified, a default [TestCoroutineContext] will be
+ * provided instead.
+ * @param testBody The code of the unit-test.
+ */
+public fun withTestContext(testContext: TestCoroutineContext = TestCoroutineContext(), testBody: TestCoroutineContext.() -> Unit) {
+    with (testContext) {
+        testBody()
+
+        if (!exceptions.all { it is CancellationException }) {
+            throw AssertionError("Coroutine encountered unhandled exceptions:\n${exceptions}")
+        }
+    }
+}
+
+/* Some helper functions */
+public fun TestCoroutineContext.launch(
+        start: CoroutineStart = CoroutineStart.DEFAULT,
+        parent: Job? = null,
+        onCompletion: CompletionHandler? = null,
+        block: suspend CoroutineScope.() -> Unit
+) = launch(this, start, parent, onCompletion, block)
+
+public fun <T> TestCoroutineContext.async(
+        start: CoroutineStart = CoroutineStart.DEFAULT,
+        parent: Job? = null,
+        onCompletion: CompletionHandler? = null,
+        block: suspend CoroutineScope.() -> T
+
+) = async(this, start, parent, onCompletion, block)
+
+public fun <T> TestCoroutineContext.runBlocking(
+        block: suspend CoroutineScope.() -> T
+) = runBlocking(this, block)

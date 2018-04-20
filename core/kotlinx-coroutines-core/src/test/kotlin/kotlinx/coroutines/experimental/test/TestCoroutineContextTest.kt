@@ -16,87 +16,89 @@
 
 package kotlinx.coroutines.experimental.test
 
-import kotlinx.coroutines.experimental.*
+import kotlinx.coroutines.experimental.CancellationException
+import kotlinx.coroutines.experimental.TimeoutCancellationException
+import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.withTimeout
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 
 class TestCoroutineContextTest {
-    private val context = TestCoroutineContext()
+    private val injectedContext = TestCoroutineContext()
 
     @After
     fun tearDown() {
-        context.cancelAllActions()
+        injectedContext.cancelAllActions()
     }
 
     @Test
-    fun testDelayWithLaunch() {
+    fun testDelayWithLaunch() = withTestContext(injectedContext) {
         val delay = 1000L
 
         var executed = false
-        launch(context) {
+        launch {
             suspendedDelayedAction(delay) {
                 executed = true
             }
         }
 
-        context.advanceTimeBy(delay / 2)
+        advanceTimeBy(delay / 2)
         assertFalse(executed)
 
-        context.advanceTimeBy(delay / 2)
+        advanceTimeBy(delay / 2)
         assertTrue(executed)
     }
 
-
     @Test
-    fun testTimeJumpWithLaunch() {
+    fun testTimeJumpWithLaunch() = withTestContext(injectedContext) {
         val delay = 1000L
 
         var executed = false
-        launch(context) {
+        launch {
             suspendedDelayedAction(delay) {
                 executed = true
             }
         }
 
-        context.advanceTimeTo(delay / 2)
+        advanceTimeTo(delay / 2)
         assertFalse(executed)
 
-        context.advanceTimeTo(delay)
+        advanceTimeTo(delay)
         assertTrue(executed)
     }
 
     @Test
-    fun testDelayWithAsync() {
+    fun testDelayWithAsync() = withTestContext(injectedContext) {
         val delay = 1000L
 
         var executed = false
-        async(context) {
+        async {
             suspendedDelayedAction(delay) {
                 executed = true
             }
         }
 
-        context.advanceTimeBy(delay / 2)
+        advanceTimeBy(delay / 2)
         assertFalse(executed)
 
-        context.advanceTimeBy(delay / 2)
+        advanceTimeBy(delay / 2)
         assertTrue(executed)
     }
 
     @Test
-    fun testDelayWithRunBlocking() {
+    fun testDelayWithRunBlocking() = withTestContext(injectedContext) {
         val delay = 1000L
 
         var executed = false
-        runBlocking(context) {
+        runBlocking {
             suspendedDelayedAction(delay) {
                 executed = true
             }
         }
 
         assertTrue(executed)
-        assertEquals(delay, context.now())
+        assertEquals(delay, now())
     }
 
     private suspend fun suspendedDelayedAction(delay: Long, action: () -> Unit) {
@@ -105,32 +107,32 @@ class TestCoroutineContextTest {
     }
 
     @Test
-    fun testDelayedFunctionWithRunBlocking() {
+    fun testDelayedFunctionWithRunBlocking() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedValue = 16
 
-        val result = runBlocking(context) {
+        val result = runBlocking {
             suspendedDelayedFunction(delay) {
                 expectedValue
             }
         }
 
         assertEquals(expectedValue, result)
-        assertEquals(delay, context.now())
+        assertEquals(delay, now())
     }
 
     @Test
-    fun testDelayedFunctionWithAsync() {
+    fun testDelayedFunctionWithAsync() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedValue = 16
 
-        val deferred = async(context) {
+        val deferred = async {
             suspendedDelayedFunction(delay) {
                 expectedValue
             }
         }
 
-        context.advanceTimeBy(delay / 2)
+        advanceTimeBy(delay / 2)
         try {
             deferred.getCompleted()
             fail("The Job should not have been completed yet.")
@@ -138,48 +140,48 @@ class TestCoroutineContextTest {
             // Success.
         }
 
-        context.advanceTimeBy(delay / 2)
+        advanceTimeBy(delay / 2)
         assertEquals(expectedValue, deferred.getCompleted())
     }
 
-    private suspend fun <T> suspendedDelayedFunction(delay: Long, function: () -> T): T {
+    private suspend fun <T> TestCoroutineContext.suspendedDelayedFunction(delay: Long, function: () -> T): T {
         delay(delay / 4)
-        return async(context) {
+        return async {
             delay((delay / 4) * 3)
             function()
         }.await()
     }
 
     @Test
-    fun testBlockingFunctionWithRunBlocking() {
+    fun testBlockingFunctionWithRunBlocking() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedValue = 16
 
-        val result = runBlocking(context) {
+        val result = runBlocking {
             suspendedBlockingFunction(delay) {
                 expectedValue
             }
         }
 
         assertEquals(expectedValue, result)
-        assertEquals(delay, context.now())
+        assertEquals(delay, now())
     }
 
     @Test
-    fun testBlockingFunctionWithAsync() {
+    fun testBlockingFunctionWithAsync() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedValue = 16
         var now = 0L
 
-        val deferred = async(context) {
+        val deferred = async {
             suspendedBlockingFunction(delay) {
                 expectedValue
             }
         }
 
-        now += context.advanceTimeBy((delay / 4) - 1)
+        now += advanceTimeBy((delay / 4) - 1)
         assertEquals((delay / 4) - 1, now)
-        assertEquals(now, context.now())
+        assertEquals(now, now())
         try {
             deferred.getCompleted()
             fail("The Job should not have been completed yet.")
@@ -187,57 +189,57 @@ class TestCoroutineContextTest {
             // Success.
         }
 
-        now += context.advanceTimeBy(1)
-        assertEquals(delay, context.now())
-        assertEquals(now, context.now())
+        now += advanceTimeBy(1)
+        assertEquals(delay, now())
+        assertEquals(now, now())
         assertEquals(expectedValue, deferred.getCompleted())
     }
 
-    private suspend fun <T> suspendedBlockingFunction(delay: Long, function: () -> T): T {
+    private suspend fun <T> TestCoroutineContext.suspendedBlockingFunction(delay: Long, function: () -> T): T {
         delay(delay / 4)
-        return runBlocking(context) {
+        return runBlocking {
             delay((delay / 4) * 3)
             function()
         }
     }
 
     @Test
-    fun testTimingOutFunctionWithAsyncAndNoTimeout() {
+    fun testTimingOutFunctionWithAsyncAndNoTimeout() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedValue = 67
 
-        val result = async(context) {
+        val result = async {
             suspendedTimingOutFunction(delay, delay + 1) {
                 expectedValue
             }
         }
 
-        context.triggerActions()
+        triggerActions()
         assertEquals(expectedValue, result.getCompleted())
     }
 
     @Test
-    fun testTimingOutFunctionWithAsyncAndTimeout() {
+    fun testTimingOutFunctionWithAsyncAndTimeout() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedValue = 67
 
-        val result = async(context) {
+        val result = async {
             suspendedTimingOutFunction(delay, delay) {
                 expectedValue
             }
         }
 
-        context.triggerActions()
+        triggerActions()
         assertTrue(result.getCompletionExceptionOrNull() is TimeoutCancellationException)
     }
 
     @Test
-    fun testTimingOutFunctionWithRunBlockingAndTimeout() {
+    fun testTimingOutFunctionWithRunBlockingAndTimeout() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedValue = 67
 
         try {
-            runBlocking(context) {
+            runBlocking {
                 suspendedTimingOutFunction(delay, delay) {
                     expectedValue
                 }
@@ -250,8 +252,8 @@ class TestCoroutineContextTest {
         }
     }
 
-    private suspend fun <T> suspendedTimingOutFunction(delay: Long, timeOut: Long, function: () -> T): T {
-        return runBlocking(context) {
+    private suspend fun <T> TestCoroutineContext.suspendedTimingOutFunction(delay: Long, timeOut: Long, function: () -> T): T {
+        return runBlocking {
             withTimeout(timeOut) {
                 delay(delay / 2)
                 val ret = function()
@@ -261,87 +263,98 @@ class TestCoroutineContextTest {
         }
     }
 
-    @Test
-    fun testExceptionHandlingWithLaunch() {
+    @Test(expected = AssertionError::class)
+    fun testWithTestContextThrowingAnAssertionError() = withTestContext(injectedContext) {
         val expectedError = IllegalAccessError("hello")
 
-        launch(context) {
+        launch {
             throw expectedError
         }
 
-        context.triggerActions()
-        assertTrue(expectedError === context.exceptions[0])
+        triggerActions()
     }
 
     @Test
-    fun testExceptionHandlingWithLaunchingChildCoroutines() {
+    fun testExceptionHandlingWithLaunch() = withTestContext(injectedContext) {
+        val expectedError = IllegalAccessError("hello")
+
+        launch {
+            throw expectedError
+        }
+
+        triggerActions()
+        assertUnhandledException { it === expectedError}
+    }
+
+    @Test
+    fun testExceptionHandlingWithLaunchingChildCoroutines() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedError = IllegalAccessError("hello")
         val expectedValue = 12
 
-        launch(context) {
+        launch {
             suspendedAsyncWithExceptionAfterDelay(delay, expectedError, expectedValue, true)
         }
 
-        context.advanceTimeBy(delay)
-        assertTrue(expectedError === context.exceptions[0])
+        advanceTimeBy(delay)
+        assertUnhandledException { it === expectedError}
     }
 
     @Test
-    fun testExceptionHandlingWithAsyncAndDontWaitForException() {
+    fun testExceptionHandlingWithAsyncAndDontWaitForException() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedError = IllegalAccessError("hello")
         val expectedValue = 12
 
-        val result = async(context) {
+        val result = async {
             suspendedAsyncWithExceptionAfterDelay(delay, expectedError, expectedValue, false)
         }
 
-        context.advanceTimeBy(delay)
+        advanceTimeBy(delay)
 
         assertNull(result.getCompletionExceptionOrNull())
         assertEquals(expectedValue, result.getCompleted())
     }
 
     @Test
-    fun testExceptionHandlingWithAsyncAndWaitForException() {
+    fun testExceptionHandlingWithAsyncAndWaitForException() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedError = IllegalAccessError("hello")
         val expectedValue = 12
 
-        val result = async(context) {
+        val result = async {
             suspendedAsyncWithExceptionAfterDelay(delay, expectedError, expectedValue, true)
         }
 
-        context.advanceTimeBy(delay)
+        advanceTimeBy(delay)
 
         val e = result.getCompletionExceptionOrNull()
         assertTrue("Expected to be thrown: '$expectedError' but was '$e'", expectedError === e)
     }
 
     @Test
-    fun testExceptionHandlingWithRunBlockingAndDontWaitForException() {
+    fun testExceptionHandlingWithRunBlockingAndDontWaitForException() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedError = IllegalAccessError("hello")
         val expectedValue = 12
 
-        val result = runBlocking(context) {
+        val result = runBlocking {
             suspendedAsyncWithExceptionAfterDelay(delay, expectedError, expectedValue, false)
         }
 
-        context.advanceTimeBy(delay)
+        advanceTimeBy(delay)
 
         assertEquals(expectedValue, result)
     }
 
     @Test
-    fun testExceptionHandlingWithRunBlockingAndWaitForException() {
+    fun testExceptionHandlingWithRunBlockingAndWaitForException() = withTestContext(injectedContext) {
         val delay = 1000L
         val expectedError = IllegalAccessError("hello")
         val expectedValue = 12
 
         try {
-            runBlocking(context) {
+            runBlocking {
                 suspendedAsyncWithExceptionAfterDelay(delay, expectedError, expectedValue, true)
             }
             fail("Expected to be thrown: '$expectedError'")
@@ -352,8 +365,8 @@ class TestCoroutineContextTest {
         }
     }
 
-    private suspend fun <T> suspendedAsyncWithExceptionAfterDelay(delay: Long, exception: Throwable, value: T, await: Boolean): T {
-        val deferred = async(context) {
+    private suspend fun <T> TestCoroutineContext.suspendedAsyncWithExceptionAfterDelay(delay: Long, exception: Throwable, value: T, await: Boolean): T {
+        val deferred = async {
             delay(delay - 1)
             throw exception
         }
@@ -362,5 +375,27 @@ class TestCoroutineContextTest {
             deferred.await()
         }
         return value
+    }
+
+    @Test
+    fun testCancellationException() = withTestContext {
+        val job = launch {
+            delay(1000)
+        }
+
+        advanceTimeBy(500)
+        assertTrue(job.cancel())
+
+        assertAllUnhandledExceptions { it is CancellationException }
+    }
+
+    @Test
+    fun testCancellationExceptionNotThrownByWithTestContext() = withTestContext {
+        val job = launch {
+            delay(1000)
+        }
+
+        advanceTimeBy(500)
+        assertTrue(job.cancel())
     }
 }
